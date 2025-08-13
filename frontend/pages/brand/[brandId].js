@@ -1,5 +1,5 @@
 import { useRouter } from 'next/router';
-import { useEffect, useState, createRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import api from '../../lib/axios';
 import { embedDashboard } from "@superset-ui/embedded-sdk";
 
@@ -10,7 +10,7 @@ export default function BrandPage() {
     const [metrics, setMetrics] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
-    const dashboardContainer = createRef();
+    const dashboardContainer = useRef(null);
 
     useEffect(() => {
         if (!brandId) return;
