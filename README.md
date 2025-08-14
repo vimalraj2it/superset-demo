@@ -1,31 +1,33 @@
-# Brand Dashboard + Superset Reports
+# Brand Dashboard + Redash Reports
 
-This project is a full-stack web application that provides a brand-specific dashboard populated with pre-built Business Intelligence (BI) reports. It uses Next.js for the frontend, Spring Boot for the backend, MongoDB as the primary data store, and Trino and Apache Superset for BI and report embedding. The entire stack is orchestrated with Docker Compose for a developer-friendly setup.
+This project is a full-stack web application that provides a brand-specific dashboard populated with BI reports. It uses Next.js for the frontend, Spring Boot for the backend, MongoDB as the primary data store, and Trino and Redash for BI and report embedding. The entire stack is orchestrated with Docker Compose.
+
+This project is a migration from the original Superset-based implementation to use Redash for embedded analytics.
 
 ## Architecture
 
 The application consists of the following services:
 
 -   **Frontend:** A Next.js (React) application that provides the user interface.
--   **Backend:** A Spring Boot (Java) application that handles authentication, data access, and generates secure tokens for embedding reports.
+-   **Backend:** A Spring Boot (Java) application that handles authentication, data access, and generates signed URLs for embedding Redash reports.
 -   **Database:** A MongoDB instance for storing user and brand data.
 -   **Query Engine:** A Trino instance that connects to MongoDB, allowing for federated queries.
--   **BI Tool:** An Apache Superset instance that connects to Trino to build and visualize dashboards.
+-   **BI Tool:** A Redash instance that connects to Trino to build and visualize dashboards.
 
 All services are containerized and managed by `docker-compose.yml`.
 
 ## Features
 
 -   JWT-based authentication for the web application.
--   Secure, token-based embedding of Superset dashboards.
+-   Secure, signed-URL embedding of Redash dashboards.
 -   Users can only view dashboards for brands they are authorized to see.
--   Row-Level Security (RLS) is enforced via the guest token to filter data at the Superset level.
+-   Dashboard-level parameterization is used to filter data for the correct brand.
 -   A sample data loader to get started quickly.
 
 ## Prerequisites
 
 -   [Docker](https://docs.docker.com/get-docker/)
--   [Docker Compose](https://docs.docker.com/compose/install/)
+-   [Docker Compose](https://docs.docker.com/compose/install/) (v2.x, i.e., the `docker compose` command, not `docker-compose`)
 
 ## Getting Started
 
@@ -36,17 +38,21 @@ All services are containerized and managed by `docker-compose.yml`.
     ```
 
 2.  **Environment Configuration:**
-    While most configuration is baked into the `docker-compose.yml` and application property files, you should review and change the default secrets.
+    Review and change the default secrets in the following files:
     -   **Backend JWT Secret:** `backend/src/main/resources/application.properties` -> `jwt.secret`
-    -   **Superset Guest Token Secret:** This secret must be identical in two places:
-        -   `backend/src/main/resources/application.properties` -> `superset.guest_token.secret`
-        -   `docker-compose.yml` -> `services.superset.environment.SUPERSET_GUEST_TOKEN_JWT_SECRET`
-    -   **Superset Secret Key:** `docker-compose.yml` -> `services.superset.environment.SUPERSET_SECRET_KEY`
+    -   **Redash Secrets:** `redash.env` -> `REDASH_COOKIE_SECRET` and `REDASH_SECRET_KEY`.
+    -   **Redash API Key:** `backend/src/main/resources/application.properties` -> `redash.api_key`. You will get this from the Redash UI in a later step.
 
-3.  **Build and run the application:**
+3.  **Initialize Redash Database:**
+    Before the first run, you need to initialize the Redash database schema.
+    ```bash
+    sudo docker compose run --rm redash-server create_db
+    ```
+
+4.  **Build and run the application:**
     From the root of the project, run:
     ```bash
-    docker-compose up --build
+    sudo docker compose up --build -d
     ```
     This will build the images for the frontend and backend services and start all containers. It may take a few minutes on the first run.
 
@@ -54,7 +60,7 @@ All services are containerized and managed by `docker-compose.yml`.
 
 -   **Frontend Application:** [http://localhost:3000](http://localhost:3000)
 -   **Backend API:** [http://localhost:8080](http://localhost:8080)
--   **Superset:** [http://localhost:8088](http://localhost:8088)
+-   **Redash:** [http://localhost:5001](http://localhost:5001)
 -   **Trino UI:** [http://localhost:8090](http://localhost:8090)
 
 ## Credentials
@@ -62,70 +68,64 @@ All services are containerized and managed by `docker-compose.yml`.
 -   **Web Application:**
     -   **Username:** `om-stage@ausmit.in`
     -   **Password:** `password`
--   **Superset:**
-    -   **Username:** `admin`
-    -   **Password:** `admin`
+-   **Redash:** You will create your own admin account on the first visit to [http://localhost:5001](http://localhost:5001).
 
-## Superset Configuration (Manual Steps)
+## Redash Configuration (Manual Steps)
 
-After starting the application, you need to perform a one-time setup in Superset to create and embed a dashboard.
+After starting the application, you need to perform a one-time setup in Redash to create and embed a dashboard.
 
-### Step 1: Create a "Guest" Role
+### Step 1: Connect Trino as a Data Source
 
-The application uses Superset's guest token mechanism for secure embedding. This requires a dedicated role with specific, limited permissions.
+1.  Log in to Redash at [http://localhost:5001](http://localhost:5001).
+2.  Navigate to **Settings** > **Data Sources**.
+3.  Click the **+ New Data Source** button and select **Trino**.
+4.  Configure the connection:
+    -   **Name:** `trino`
+    -   **Host:** `trino` (the service name from `docker-compose.yml`)
+    -   **Port:** `8080`
+    -   **Username:** `redash` (or any other username)
+    -   **Catalog:** `mongodb`
+    -   **Schema:** `brand-dashboard`
+5.  Click **Create**, then **Test Connection** to verify.
 
-1.  Log in to Superset at [http://localhost:8088](http://localhost:8088) with the `admin`/`admin` credentials.
-2.  Navigate to **Settings** > **List Roles**.
-3.  Click the **+ ROLE** button.
-4.  Name the role `Guest`.
-5.  Find and add the following permissions:
-    -   `can read on Dashboard`
-    -   `can read on Chart`
-    -   `can read on Dataset`
-    -   `datasource access on [your_dataset_name]` (You will add this permission after creating your dataset in Step 3).
-6.  Click **Save**.
+### Step 2: Create a Parameterized Query
 
-### Step 2: Connect Trino as a Data Source
+1.  Click **Create** > **New Query**.
+2.  Select the `trino` data source.
+3.  Write a SQL query that uses a parameter to filter by brand ID. Redash uses `{{ parameter_name }}` syntax for parameters.
+    ```sql
+    SELECT * FROM "mongodb"."brand-dashboard".brands
+    WHERE brand_id = '{{ brand_id }}'
+    ```
+4.  In the parameter settings below the query editor, give the `brand_id` parameter a default value (e.g., `1`) to test the query.
+5.  Save the query (e.g., "Brand Data by ID").
 
-1.  Navigate to **Data** > **Databases**.
-2.  Click the **+ DATABASE** button.
-3.  Select **Trino**.
-4.  Set the **SQLALCHEMY URI** to: `trino://trino@trino:8080` (Here, `trino` is the service name from `docker-compose.yml`).
-5.  Click the **Advanced** tab, then the **Security** sub-tab.
-6.  Check the box for **Enable template processing**. This is crucial for row-level security to work.
-7.  Click **Connect**.
+### Step 3: Create a Dashboard and Get its ID
 
-### Step 3: Create a Dataset
+1.  Click **Create** > **New Dashboard**.
+2.  Give the dashboard a name (e.g., "Brand Details").
+3.  Add the query widget you created in the previous step to the dashboard.
+4.  When adding the widget, map the dashboard's `brand_id` parameter to the query's `brand_id` parameter.
+5.  Publish the dashboard.
+6.  View your dashboard. The URL will look like this: `http://localhost:5001/dashboards/1-brand-details`. The `1` is the ID of the dashboard.
 
-1.  Navigate to **Data** > **Datasets**.
-2.  Click the **+ DATASET** button.
-3.  Select your Trino database as the **DATABASE**.
-4.  Select `mongodb` as the **SCHEMA**.
-5.  Select `brands` as the **TABLE**.
-6.  Click **Create Dataset and Create Chart**. After creating the dataset, go back to the "Guest" role and grant it datasource access as mentioned in Step 1.
+### Step 4: Get Your User API Key
 
-### Step 4: Create a Dashboard and Get its ID
-
-1.  Create one or more charts using the dataset you just created.
-2.  Assemble these charts into a new dashboard.
-3.  View your dashboard. The URL will look like this: `http://localhost:8088/superset/dashboard/1/`. The `1` is the ID of the dashboard.
-    *(Note: For dashboards created via the UI, the ID is usually an integer. For imported dashboards or newer Superset versions, this might be a UUID like `d8a83471-4a86-4595-88b8-738836523fa9`)*.
+1.  In Redash, click your user profile icon in the top right and select your profile.
+2.  On the left, you will see your **API Key**. Copy this key.
 
 ### Step 5: Update Backend Configuration
 
-The backend needs to know the ID of the dashboard and the dataset to generate the correct guest token.
+The backend needs the dashboard ID and your Redash API key to generate the correct signed URL.
 
-1.  **Update Dashboard ID:**
-    -   Open `backend/src/main/java/com/branddashboard/controller/ReportController.java`.
-    -   Change the value of the `SUPERSET_DASHBOARD_ID` constant to the ID you found in the previous step.
-2.  **Update Dataset ID:**
-    -   In the same file, locate the `generateGuestToken` method.
-    -   Find the line `rlsRule.put("dataset", 1);`.
-    -   You need to replace `1` with the ID of the dataset you created in Step 3. You can find this ID by navigating to your dataset in Superset and looking at its URL.
-3.  **Rebuild the backend:**
-    -   After making these changes, you need to rebuild the backend service:
-        ```bash
-        docker-compose up --build -d backend
-        ```
+1.  Open `backend/src/main/resources/application.properties`.
+2.  Set the value for `redash.dashboard.id` to the ID you found in Step 3.
+3.  Set the value for `redash.api_key` to the key you copied in Step 4.
 
-After completing these steps, logging into the application and navigating to a brand's detail page should now display the securely embedded Superset dashboard, filtered for that specific brand.
+### Step 6: Restart and Verify
+
+1.  Restart the backend service to apply the new configuration:
+    ```bash
+    sudo docker compose restart backend
+    ```
+2.  Log into the main application at [http://localhost:3000](http://localhost:3000) and navigate to a brand's detail page. The Redash dashboard should now be embedded and filtered correctly for that brand.

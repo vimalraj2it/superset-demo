@@ -1,16 +1,15 @@
 import { useRouter } from 'next/router';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import api from '../../lib/axios';
-import { embedDashboard } from "@superset-ui/embedded-sdk";
 
 export default function BrandPage() {
     const router = useRouter();
     const { brandId } = router.query;
     const [brand, setBrand] = useState(null);
     const [metrics, setMetrics] = useState(null);
+    const [redashUrl, setRedashUrl] = useState('');
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
-    const dashboardContainer = useRef(null);
 
     useEffect(() => {
         if (!brandId) return;
@@ -19,36 +18,22 @@ export default function BrandPage() {
             setLoading(true);
             setError('');
             try {
+                // Fetch brand and metrics data
                 const brandRes = await api.get(`/brands/${brandId}`);
                 setBrand(brandRes.data);
 
                 const metricsRes = await api.get(`/brands/${brandId}/metrics/summary`);
                 setMetrics(metricsRes.data);
 
-                // Fetch the guest token from the backend
-                const tokenRes = await api.get(`/brands/${brandId}/reports/iframe`);
-                const embedToken = tokenRes.data.token;
-
-                // Embed the dashboard using the SDK
-                if (dashboardContainer.current) {
-                    embedDashboard({
-                        id: "1", // The same UUID used in the backend
-                        supersetDomain: "http://localhost:8088",
-                        mountPoint: dashboardContainer.current,
-                        fetchGuestToken: () => Promise.resolve(embedToken),
-                        dashboardUiConfig: {
-                            hideTitle: true,
-                            hideChartControls: true,
-                            hideTab: true,
-                        },
-                    });
-                }
+                // Fetch the signed URL for the Redash dashboard
+                const redashRes = await api.get(`/brands/${brandId}/reports/redash-iframe`);
+                setRedashUrl(redashRes.data.url);
 
             } catch (err) {
-                setError('Failed to fetch or embed brand data.');
+                setError('Failed to fetch brand data or dashboard URL.');
                 console.error(err);
                 if (err.response && err.response.status === 403) {
-                    router.push('/');
+                    router.push('/'); // Redirect if not authorized
                 }
             } finally {
                 setLoading(false);
@@ -56,10 +41,10 @@ export default function BrandPage() {
         };
 
         fetchData();
-    }, [brandId, router, dashboardContainer]);
+    }, [brandId, router]);
 
     if (error) return <p style={{ color: 'red' }}>{error}</p>;
-    if (!brand && loading) return <p>Loading...</p>;
+    if (loading) return <p>Loading...</p>;
     if (!brand) return <p>No brand data found.</p>;
 
     return (
@@ -93,11 +78,17 @@ export default function BrandPage() {
                     )}
                 </div>
 
-                <div style={{ marginTop: '2rem', width: '100%', height: '600px', border: '1px solid #ddd' }}>
-                    <h2>Superset Dashboard</h2>
-                    <div ref={dashboardContainer} style={{ width: '100%', height: '100%' }}>
-                        {loading && <p>Loading dashboard...</p>}
-                    </div>
+                <div style={{ marginTop: '2rem', width: '100%', height: '800px', border: '1px solid #ddd' }}>
+                    <h2>Redash Dashboard</h2>
+                    {redashUrl ? (
+                        <iframe
+                            src={redashUrl}
+                            title="Redash Dashboard"
+                            style={{ width: '100%', height: '100%', border: 'none' }}
+                        />
+                    ) : (
+                        <p>Loading dashboard...</p>
+                    )}
                 </div>
             </main>
         </div>
