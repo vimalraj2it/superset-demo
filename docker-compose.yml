@@ -64,6 +64,9 @@ services:
       - REDASH_FRAME_ANCESTORS="'self' http://localhost:3000 http://localhost:8080 http://127.0.0.1:3000 http://127.0.0.1:8080"
       - REDASH_ALLOW_IFRAME_EMBEDDING=true
       - REDASH_DISABLE_FRAME_ANCESTORS=true
+      - REDASH_CONFIG_FILE=/app/redash_config.py
+    volumes:
+      - ./redash_config.py:/app/redash_config.py:ro
     depends_on:
       - redash-postgres
       - redash-redis
@@ -92,6 +95,18 @@ services:
     image: redis:6-alpine
     container_name: redash-redis
     restart: unless-stopped
+    networks:
+      - brand-dashboard-net
+
+  redash-proxy:
+    image: nginx:alpine
+    container_name: redash-proxy
+    ports:
+      - "5002:5002"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - redash-server
     networks:
       - brand-dashboard-net
 

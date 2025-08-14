@@ -20,7 +20,6 @@ import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.Base64;
-import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
@@ -42,15 +41,18 @@ public class ReportController {
     @Value("${redash.dashboard.id}")
     private String redashDashboardId;
 
+    @Value("${jwt.secret}")
+    private String jwtSecret;
+
     @GetMapping("/redash-iframe")
     public ResponseEntity<RedashEmbedUrlResponse> getRedashIframe(@PathVariable String brandId) {
         User user = getCurrentUser();
         if (user.getBrandIds().contains(brandId)) {
             try {
-                String url = generateRedashUrl(brandId);
+                String url = generateRedashEmbedUrl(brandId, user);
                 return ResponseEntity.ok(new RedashEmbedUrlResponse(url));
-            } catch (NoSuchAlgorithmException | InvalidKeyException e) {
-                // In a real app, you'd want to log this error
+            } catch (Exception e) {
+                e.printStackTrace();
                 return ResponseEntity.status(500).build();
             }
         } else {
@@ -58,31 +60,60 @@ public class ReportController {
         }
     }
 
-    private String generateRedashUrl(String brandId) throws NoSuchAlgorithmException, InvalidKeyException {
-        // The path for the Redash dashboard, including the parameter for the brand ID
-        String queryPath = String.format("/embed/dashboards/%s", redashDashboardId);
-        long expires = Instant.now().getEpochSecond() + 300; // 5-minute expiration
+    private String generateRedashEmbedUrl(String brandId, User user) throws Exception {
+        // Since Redash embed requires authentication, let's use the query API approach
+        // This will return data that can be embedded in a custom dashboard
         
-        // Redash expects the signature to be calculated on: path + expires + p_brand_id
-        String toSign = queryPath + expires + brandId;
-
-        // Create the HMAC-SHA256 signature
-        Mac mac = Mac.getInstance("HmacSHA256");
-        mac.init(new SecretKeySpec(redashApiKey.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-        byte[] signatureBytes = mac.doFinal(toSign.getBytes(StandardCharsets.UTF_8));
-        String signature = Base64.getEncoder().encodeToString(signatureBytes);
-
-        // Construct the final signed URL with parameters in the correct order
-        String finalUrl = String.format("%s%s?expires=%d&p_brand_id=%s&signature=%s", 
-            redashUrl, queryPath, expires, brandId, signature);
+        // First, let's try to get the dashboard data using the API
+        String queryUrl = String.format("%s/api/dashboards/%s?api_key=%s", 
+            redashUrl, redashDashboardId, redashApiKey);
         
         // Log the generated URL for debugging
-        System.out.println("Generated Redash URL: " + finalUrl);
+        System.out.println("Generated Redash Query URL: " + queryUrl);
         System.out.println("Redash URL from config: " + redashUrl);
         System.out.println("Dashboard ID from config: " + redashDashboardId);
-        System.out.println("String to sign: " + toSign);
+        System.out.println("Using Query API approach");
         
-        return finalUrl;
+        // For now, return the regular dashboard URL as fallback
+        // In a real implementation, you'd fetch the data and create a custom embed
+        return String.format("%s/dashboards/%s-test?p_brand_id=%s", 
+            redashUrl, redashDashboardId, brandId);
+    }
+
+    private String generateRedashJWT(User user) {
+        try {
+            // Create JWT payload for Redash with the exact format it expects
+            Map<String, Object> claims = new HashMap<>();
+            claims.put("user_id", user.getId());
+            claims.put("email", user.getEmailId());
+            claims.put("name", user.getEmailId());
+            claims.put("org_id", 1);
+            claims.put("exp", Instant.now().getEpochSecond() + 3600); // 1 hour expiration
+            claims.put("iat", Instant.now().getEpochSecond()); // issued at
+            claims.put("iss", "brand-dashboard"); // issuer
+            claims.put("aud", "redash"); // audience
+            
+            // Create JWT header
+            String header = Base64.getEncoder().encodeToString("{\"alg\":\"HS256\",\"typ\":\"JWT\"}".getBytes());
+            
+            // Create JWT payload
+            String payload = Base64.getEncoder().encodeToString(
+                new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(claims).getBytes()
+            );
+            
+            // Create signature
+            String data = header + "." + payload;
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(jwtSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            byte[] signatureBytes = mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
+            String signature = Base64.getEncoder().encodeToString(signatureBytes);
+            
+            // Return complete JWT
+            return data + "." + signature;
+            
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to generate JWT token", e);
+        }
     }
 
     private User getCurrentUser() {
