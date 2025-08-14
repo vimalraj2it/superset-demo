@@ -60,9 +60,11 @@ public class ReportController {
 
     private String generateRedashUrl(String brandId) throws NoSuchAlgorithmException, InvalidKeyException {
         // The path for the Redash dashboard, including the parameter for the brand ID
-        String queryPath = String.format("/embed/dashboards/%s?p_brand_id=%s", redashDashboardId, brandId);
+        String queryPath = String.format("/embed/dashboards/%s", redashDashboardId);
         long expires = Instant.now().getEpochSecond() + 300; // 5-minute expiration
-        String toSign = queryPath + expires;
+        
+        // Redash expects the signature to be calculated on: path + expires + p_brand_id
+        String toSign = queryPath + expires + brandId;
 
         // Create the HMAC-SHA256 signature
         Mac mac = Mac.getInstance("HmacSHA256");
@@ -70,8 +72,17 @@ public class ReportController {
         byte[] signatureBytes = mac.doFinal(toSign.getBytes(StandardCharsets.UTF_8));
         String signature = Base64.getEncoder().encodeToString(signatureBytes);
 
-        // Construct the final signed URL
-        return String.format("%s%s&expires=%d&signature=%s", redashUrl, queryPath, expires, signature);
+        // Construct the final signed URL with parameters in the correct order
+        String finalUrl = String.format("%s%s?expires=%d&p_brand_id=%s&signature=%s", 
+            redashUrl, queryPath, expires, brandId, signature);
+        
+        // Log the generated URL for debugging
+        System.out.println("Generated Redash URL: " + finalUrl);
+        System.out.println("Redash URL from config: " + redashUrl);
+        System.out.println("Dashboard ID from config: " + redashDashboardId);
+        System.out.println("String to sign: " + toSign);
+        
+        return finalUrl;
     }
 
     private User getCurrentUser() {
