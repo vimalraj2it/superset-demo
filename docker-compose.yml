@@ -61,6 +61,9 @@ services:
       - "5001:5000"
     environment:
       - REDASH_WEB_WORKERS=4
+      - REDASH_FRAME_ANCESTORS="'self' http://localhost:3000 http://localhost:8080 http://127.0.0.1:3000 http://127.0.0.1:8080"
+      - REDASH_ALLOW_IFRAME_EMBEDDING=true
+      - REDASH_DISABLE_FRAME_ANCESTORS=true
     depends_on:
       - redash-postgres
       - redash-redis
